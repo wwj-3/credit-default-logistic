@@ -1,0 +1,102 @@
+---
+title: "信用卡违约影响因素分析"
+author: "wwj"
+date: "2026-10-13"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+## 背景
+
+信用卡违约是金融机构的核心风险之一。本研究使用 `ISLR2` 包中的 `Default` 数据集，探讨学生身份、信用卡余额和收入与违约风险的关系。
+
+**研究问题：** 在信用卡用户中，学生身份、信用卡余额和收入是否与违约风险相关？
+
+## 数据来源
+
+数据来自 `ISLR2` 包，原始来源为 James et al. (2021) *An Introduction to Statistical Learning*。
+
+- 样本量：10000
+- 结局变量：`default`（是否违约，No/Yes）
+- 自变量：`student`（是否学生）、`balance`（信用卡余额）、`income`（收入）
+
+## 数据清洗
+
+```{r}
+library(ISLR2)
+library(tidyverse)
+
+data(Default)
+d <- Default %>%
+  mutate(default = factor(default, levels = c("No", "Yes")))
+
+colSums(is.na(d))
+summary(d)
+```
+
+数据无缺失值。
+
+## 描述性统计
+
+```{r}
+library(gtsummary)
+
+d %>%
+  select(default, student, balance, income) %>%
+  tbl_summary(by = default) %>%
+  add_p()
+```
+
+## 双变量分析
+
+```{r}
+chisq.test(table(d$student, d$default))
+t.test(balance ~ default, data = d)
+t.test(income ~ default, data = d)
+```
+
+```{r}
+library(broom)
+
+fit_b <- glm(default ~ balance, data = d, family = binomial)
+fit_s <- glm(default ~ student, data = d, family = binomial)
+fit_i <- glm(default ~ income,  data = d, family = binomial)
+
+bind_rows(
+  tidy(fit_b, exponentiate = TRUE, conf.int = TRUE) %>% mutate(model = "balance"),
+  tidy(fit_s, exponentiate = TRUE, conf.int = TRUE) %>% mutate(model = "student"),
+  tidy(fit_i, exponentiate = TRUE, conf.int = TRUE) %>% mutate(model = "income")
+) %>%
+  filter(term != "(Intercept)")
+```
+
+## 多因素 logistic 回归
+
+```{r}
+fit_multi <- glm(default ~ student + balance + income,
+                 data = d, family = binomial)
+
+tbl_regression(fit_multi, exponentiate = TRUE)
+```
+
+## 模型诊断
+
+```{r}
+library(performance)
+check_collinearity(fit_multi)
+```
+
+```{r}
+library(pROC)
+d$prob <- predict(fit_multi, type = "response")
+roc_obj <- roc(d$default, d$prob)
+auc(roc_obj)
+plot(roc_obj, main = "ROC Curve")
+```
+
+## 结论
+
+信用卡余额是违约最强的预测变量。学生身份在单因素分析中看似保护，控制余额后反转为风险因素，提示混杂效应。
